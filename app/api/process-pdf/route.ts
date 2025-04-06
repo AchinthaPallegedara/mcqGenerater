@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
 interface MCQ {
   question: string;
   options: string[];
@@ -11,15 +9,15 @@ interface MCQ {
 }
 
 declare global {
-  interface Global {
-    mcqs: MCQ[];
-  }
+  // eslint-disable-next-line no-var
+  var mcqs: MCQ[] | undefined;
 }
 
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("pdf") as File;
+    const apiKey = formData.get("apiKey") as string;
 
     if (!file) {
       return NextResponse.json(
@@ -33,11 +31,28 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "API key is required" },
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
+
+    // Use API key from request instead of environment variable
+    const genAI = new GoogleGenerativeAI(apiKey);
+
     // Convert File to ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString("base64");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-pro-exp-03-25",
+    });
 
     const result = await model.generateContent({
       contents: [
@@ -45,7 +60,7 @@ export async function POST(request: Request) {
           role: "user",
           parts: [
             {
-              text: `You are a professional MCQ generator. Generate 30 multiple choice questions based on the following document. 
+              text: `You are a professional MCQ generator. Generate 30 multiple choice questions based on the following document.  
             For each question, provide:
             1. A clear and concise question
             2. Four distinct options (A, B, C, D)

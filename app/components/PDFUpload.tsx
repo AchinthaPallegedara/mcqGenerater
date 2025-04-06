@@ -1,13 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function PDFUpload() {
   const [file, setFile] = useState<File | null>(null);
+  const [apiKey, setApiKey] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+
+  // Load saved API key from localStorage on component mount
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem("geminiApiKey");
+    if (savedApiKey) {
+      setApiKey(savedApiKey);
+    }
+  }, []);
+
+  // Save API key to localStorage whenever it changes
+  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newApiKey = e.target.value;
+    setApiKey(newApiKey);
+    localStorage.setItem("geminiApiKey", newApiKey);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -24,12 +40,20 @@ export default function PDFUpload() {
 
   const handleUpload = async () => {
     if (!file) return;
+    if (!apiKey.trim()) {
+      setError("Please enter your Gemini API key");
+      return;
+    }
+
+    // Save API key to localStorage before upload
+    localStorage.setItem("geminiApiKey", apiKey);
 
     setIsLoading(true);
     setError(null);
 
     const formData = new FormData();
     formData.append("pdf", file);
+    formData.append("apiKey", apiKey);
 
     try {
       const response = await fetch("/api/process-pdf", {
@@ -37,7 +61,6 @@ export default function PDFUpload() {
         body: formData,
       });
 
-      // Check if the response is JSON
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         throw new Error("Server returned an invalid response format");
@@ -75,6 +98,25 @@ export default function PDFUpload() {
             onChange={handleFileChange}
             className="w-full p-2 border rounded"
           />
+        </div>
+        <div className="mb-4">
+          <label
+            htmlFor="apiKey"
+            className="block text-sm font-medium mb-1 text-gray-300"
+          >
+            Gemini API Key
+          </label>
+          <input
+            id="apiKey"
+            type="password"
+            value={apiKey}
+            onChange={handleApiKeyChange}
+            placeholder="Enter your Gemini API key"
+            className="w-full p-2 border rounded"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Your API key is saved in your browser for convenience
+          </p>
         </div>
         {error && (
           <div className="mb-4 p-2 bg-red-100 text-red-700 rounded">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 
 interface MCQ {
@@ -15,6 +16,7 @@ export default function MCQQuiz() {
   const [showExplanation, setShowExplanation] = useState(false);
   const [mcqs, setMcqs] = useState<MCQ[]>([]);
   const [loading, setLoading] = useState(true);
+  const [marks, setMarks] = useState(0);
 
   useEffect(() => {
     const fetchMCQs = async () => {
@@ -35,6 +37,11 @@ export default function MCQQuiz() {
   const handleAnswerSelect = (option: string) => {
     setSelectedAnswer(option);
     setShowExplanation(true);
+
+    // Update marks if answer is correct
+    if (option === mcqs[currentQuestion].correctAnswer) {
+      setMarks((prev) => prev + 1);
+    }
   };
 
   const handleNextQuestion = () => {
@@ -45,7 +52,7 @@ export default function MCQQuiz() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center ">
         <div className="text-xl">Loading questions...</div>
       </div>
     );
@@ -53,8 +60,11 @@ export default function MCQQuiz() {
 
   if (currentQuestion >= mcqs.length) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen">
+      <div className="flex flex-col items-center justify-center ">
         <h2 className="text-2xl font-bold mb-4">Quiz Completed!</h2>
+        <div className="text-xl mb-6">
+          Your Score: {marks} out of {mcqs.length}
+        </div>
         <button
           onClick={() => window.location.reload()}
           className="bg-blue-500 text-gray-800 py-2 px-4 rounded hover:bg-blue-600"
@@ -69,11 +79,19 @@ export default function MCQQuiz() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4">
+      <div className="w-full max-w-2xl ">
+        <Link href={"/"}>
+          <button className="flex items-start p-4 cursor-pointer">Back</button>
+        </Link>
+      </div>
       <div className="w-full max-w-2xl p-6 bg-gray-800 rounded-lg shadow-md">
-        <div className="mb-4">
-          <span className="text-gray-600">
+        <div className="mb-4 flex justify-between items-center">
+          <span className="text-gray-400">
             Question {currentQuestion + 1} of {mcqs.length}
           </span>
+          <div className="flex items-center">
+            <span className="text-gray-400">Score: {marks}</span>
+          </div>
         </div>
 
         <h2 className="text-xl font-bold mb-6">{currentMCQ.question}</h2>
@@ -84,7 +102,7 @@ export default function MCQQuiz() {
               key={index}
               onClick={() => handleAnswerSelect(option)}
               disabled={showExplanation}
-              className={`w-full p-3 text-left rounded border ${
+              className={`w-full p-3 text-left rounded border cursor-pointer ${
                 showExplanation
                   ? option === currentMCQ.correctAnswer
                     ? "bg-green-900 border-green-500"
