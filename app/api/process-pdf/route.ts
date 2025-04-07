@@ -63,7 +63,7 @@ export async function POST(request: Request) {
               text: `You are a professional MCQ generator. Generate 30 multiple choice questions based on the following document.  
             For each question, provide:
             1. A clear and concise question
-            2. Four distinct options (A, B, C, D)
+            2. Five distinct options (A, B, C, D, E)
             3. The correct answer
             4. A detailed explanation of why the answer is correct
 
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
             [
               {
                 "question": "question text",
-                "options": ["option A", "option B", "option C", "option D"],
+                "options": ["option A", "option B", "option C", "option D", "option E"],
                 "correctAnswer": "correct option text",
                 "explanation": "detailed explanation"
               }
