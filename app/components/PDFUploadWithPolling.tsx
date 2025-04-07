@@ -10,8 +10,17 @@ export default function PDFUploadWithPolling() {
   const [progress, setProgress] = useState("Starting...");
   const [error, setError] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
   const pollInterval = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
+
+  // Load API key from localStorage
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem("geminiApiKey");
+    if (savedApiKey) {
+      setApiKey(savedApiKey);
+    }
+  }, []);
 
   // Clean up polling interval on unmount
   useEffect(() => {
@@ -24,14 +33,25 @@ export default function PDFUploadWithPolling() {
 
   const startPolling = () => {
     setElapsedTime(0);
+    setRetryCount(0);
 
     // Poll every 2 seconds
     pollInterval.current = setInterval(async () => {
       try {
         const response = await fetch("/api/process-pdf");
 
+        // Reset retry counter on successful response
+        if (retryCount > 0) setRetryCount(0);
+
         if (!response.ok) {
-          throw new Error("Failed to check processing status");
+          if (response.status === 504) {
+            throw new Error(
+              "Server timeout. The PDF might be too large or complex to process."
+            );
+          }
+          throw new Error(
+            `Failed to check processing status: ${response.status}`
+          );
         }
 
         const data = await response.json();
@@ -71,19 +91,37 @@ export default function PDFUploadWithPolling() {
           if (pollInterval.current) clearInterval(pollInterval.current);
           setProcessing(false);
           setError(
-            "Processing timed out. Please try again with a smaller PDF."
+            "Processing timed out. Please try again with a smaller PDF or break your document into smaller parts."
           );
         }
       } catch (error) {
         console.error("Polling error:", error);
 
-        // Only show errors after a few failed attempts (to handle network hiccups)
-        if (elapsedTime > 10) {
+        // Increment retry counter
+        setRetryCount((prev) => prev + 1);
+
+        // Handle timeout errors specifically
+        if (error instanceof Error && error.message.includes("timeout")) {
+          if (pollInterval.current) clearInterval(pollInterval.current);
+          setProcessing(false);
           setError(
-            "Error checking processing status. Please refresh the page."
+            `Server timeout error. Please try with a smaller PDF file or try again later.`
+          );
+          return;
+        }
+
+        // Only show errors after a few failed attempts (to handle network hiccups)
+        if (retryCount >= 3) {
+          setError(
+            "Error checking processing status. The server might be under heavy load. Please try again later."
           );
           if (pollInterval.current) clearInterval(pollInterval.current);
           setProcessing(false);
+        } else {
+          // Show retry attempt to the user but keep polling
+          setProgress(
+            `Network issue encountered. Retry attempt ${retryCount}/3...`
+          );
         }
       }
     }, 2000);
@@ -91,8 +129,26 @@ export default function PDFUploadWithPolling() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+
+      // Warn about large files
+      if (selectedFile.size > 5 * 1024 * 1024) {
+        // 5MB
+        setError(
+          "Warning: Large PDFs may cause timeout errors. Consider using a smaller file."
+        );
+      } else {
+        setError(null);
+      }
     }
+  };
+
+  // Save API key to localStorage
+  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newApiKey = e.target.value;
+    setApiKey(newApiKey);
+    localStorage.setItem("geminiApiKey", newApiKey);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -118,30 +174,66 @@ export default function PDFUploadWithPolling() {
       formData.append("apiKey", apiKey);
       formData.append("withPolling", "true");
 
-      const response = await fetch("/api/process-pdf", {
-        method: "POST",
-        body: formData,
-      });
+      // Save API key to localStorage before upload
+      localStorage.setItem("geminiApiKey", apiKey);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to start PDF processing");
-      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-      const data = await response.json();
+      try {
+        const response = await fetch("/api/process-pdf", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
 
-      if (data.status === "processing") {
-        // Start polling for results
-        setProgress("PDF uploaded. Processing started...");
-        startPolling();
-      } else {
-        throw new Error("Unexpected response from server");
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          if (response.status === 504) {
+            throw new Error(
+              "Server timeout. The PDF might be too large or complex to process."
+            );
+          }
+
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error ||
+              `Failed to start PDF processing (Status: ${response.status})`
+          );
+        }
+
+        const data = await response.json();
+
+        if (data.status === "processing") {
+          // Start polling for results
+          setProgress("PDF uploaded. Processing started...");
+          startPolling();
+        } else {
+          throw new Error("Unexpected response from server");
+        }
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
       }
     } catch (error) {
       console.error("Error:", error);
-      setError(
-        error instanceof Error ? error.message : "Failed to process PDF"
-      );
+
+      let errorMessage = "Failed to process PDF";
+
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage =
+            "Request timed out. The PDF may be too large or the server is busy.";
+        } else if (error.message.includes("timeout")) {
+          errorMessage =
+            "Server timeout error. Please try with a smaller PDF file.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
+      setError(errorMessage);
       setProcessing(false);
     }
   };
@@ -166,6 +258,9 @@ export default function PDFUploadWithPolling() {
               onChange={handleFileChange}
               className="w-full p-2 border rounded bg-gray-800"
             />
+            <p className="text-sm text-gray-400">
+              Recommended: PDFs under 5MB work best to avoid timeout errors.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -173,12 +268,12 @@ export default function PDFUploadWithPolling() {
             <input
               type="password"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={handleApiKeyChange}
               className="w-full p-2 border rounded bg-gray-800"
               placeholder="Enter your Gemini API key"
             />
             <p className="text-sm text-gray-400">
-              Your API key is only used for this request and not stored.
+              Your API key is saved locally for convenience.
             </p>
           </div>
 
